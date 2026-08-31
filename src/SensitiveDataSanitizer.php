@@ -54,6 +54,30 @@ final class SensitiveDataSanitizer
 	public const array CARD_NUMBER_KEYS = ['pan', 'card_number'];
 
 	/**
+	 * Prefixy a delky hlavnich karetnich schemat (ISO/IEC 7812).
+	 *
+	 * POUZIVA SE JEN K ROZPOZNANI SCHEMATU, NE K MASKOVANI. Maskuje se
+	 * schvalne siroce (delka + Luhn), protoze seznam prefixu stara: dvojkova
+	 * rada MasterCard (2221-2720) prisla az v roce 2017 a regexy, ktere ji
+	 * nemely, tise propoustely platne karty. U sanitizeru je falesne negativni
+	 * shoda drazsi nez falesne pozitivni.
+	 *
+	 * Prefix se hodi na neco jineho: shoda znamena "tohle je hodne
+	 * pravdepodobne skutecny PAN", coz je signal, ze je rozbita integrace
+	 * vys - viz onCardNumberDetected().
+	 */
+	public const array CARD_SCHEMES = [
+		'Visa' => '/^4\d{12}(\d{3})?(\d{3})?$/',
+		'MasterCard' => '/^(5[1-5]\d{14}|2(22[1-9]|2[3-9]\d|[3-6]\d{2}|7[01]\d|720)\d{12})$/',
+		'Amex' => '/^3[47]\d{13}$/',
+		'Discover' => '/^(6011\d{12}|65\d{14}|64[4-9]\d{13})$/',
+		'DinersClub' => '/^(30[0-5]\d{11}|3[68]\d{12})$/',
+		'JCB' => '/^35(2[89]|[3-8]\d)\d{12}$/',
+		'UnionPay' => '/^62\d{14,17}$/',
+		'Maestro' => '/^(5018|5020|5038|5893|6304|6759|676[1-3])\d{8,15}$/',
+	];
+
+	/**
 	 * Hlavicky, ktere se do logu nedostanou VUBEC (ani zamaskovane) - jejich
 	 * pritomnost sama o sobe nema diagnostickou hodnotu.
 	 */
@@ -69,6 +93,9 @@ final class SensitiveDataSanitizer
 
 	/** @var list<string> tajemstvi registrovana za behu pozadavku */
 	private array $hiddenValues = [];
+
+	/** @var (callable(string, int): void)|null */
+	private $cardNumberListener = null;
 
 	/**
 	 * @param list<string> $sensitiveKeys nazvy klicu, jejichz hodnota se maskuje
@@ -113,6 +140,38 @@ final class SensitiveDataSanitizer
 		}
 
 		return $this;
+	}
+
+	/**
+	 * Zavola se, kdyz zamaskovane cislo odpovida prefixu nekterého karetniho
+	 * schematu - tedy kdyz je hodne pravdepodobne, ze slo o skutecny PAN.
+	 *
+	 * Existuje proto, aby se nemaskovalo POTICHU: PAN v logu znamena rozbitou
+	 * integraci vys a nekdo se to musi dozvedet, jinak zustane databaze cista
+	 * a pokladna posila PAN dal i jinam.
+	 *
+	 * Listener dostane NAZEV SCHEMATU A DELKU, nikdy hodnotu - jinak by
+	 * varovani bylo dalsim mistem, kde PAN unikne.
+	 *
+	 * @param callable(string, int): void $listener
+	 */
+	public function onCardNumberDetected(callable $listener): static
+	{
+		$this->cardNumberListener = $listener;
+
+		return $this;
+	}
+
+	/** Rozpozna karetni schema podle prefixu a delky; null = zadne neznamé. */
+	public static function detectCardScheme(string $digits): ?string
+	{
+		foreach (self::CARD_SCHEMES as $scheme => $pattern) {
+			if (preg_match($pattern, $digits) === 1) {
+				return $scheme;
+			}
+		}
+
+		return null;
 	}
 
 	public function disableCardNumberMasking(): static
@@ -297,7 +356,7 @@ final class SensitiveDataSanitizer
 		}
 
 		if ($this->maskCardNumbers) {
-			$value = self::maskCardNumbersIn($value);
+			$value = $this->maskCardNumbersIn($value);
 		}
 
 		return $value;
@@ -308,11 +367,11 @@ final class SensitiveDataSanitizer
 	 * projit Luhnovou kontrolou, aby se nemaskovala kazda delsi cislice
 	 * (objednavky, EAN, IC).
 	 */
-	private static function maskCardNumbersIn(string $value): string
+	private function maskCardNumbersIn(string $value): string
 	{
 		return preg_replace_callback(
 			'/(?<![\d])\d[\d \-]{11,21}\d(?![\d])/',
-			static function (array $matches): string {
+			function (array $matches): string {
 				$digits = preg_replace('/\D/', '', $matches[0]) ?? '';
 				$length = strlen($digits);
 
@@ -327,6 +386,12 @@ final class SensitiveDataSanitizer
 				// realne karty neminie.
 				if (self::looksLikeTimestamp($digits)) {
 					return $matches[0];
+				}
+
+				// prefix schematu = vysoka jistota, ze to je skutecny PAN;
+				// tehdy ma smysl upozornit, ze je rozbita integrace vys
+				if ($this->cardNumberListener !== null && ($scheme = self::detectCardScheme($digits)) !== null) {
+					($this->cardNumberListener)($scheme, $length);
 				}
 
 				return str_repeat('*', $length - 4) . substr($digits, -4);

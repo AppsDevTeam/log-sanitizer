@@ -112,6 +112,38 @@ maskování karet neprojde vůbec.
 SAD (`cvv`, `pin`, `track`…) se naopak maskuje vždy celý — ten se ukládat
 nesmí ani zkrácený.
 
+## Rozpoznání schématu a upozornění
+
+PAN má strukturu podle ISO/IEC 7812 a schémata mají charakteristické prefixy
+a délky (Visa `4…`, MasterCard `51–55` a `2221–2720`, Amex `34`/`37`…).
+Prefix zúží falešné shody **8,2×** — z 10 % na 1,2 % měřeno na časových
+značkách a náhodných ID.
+
+**Maskuje se přesto široce, jen podle délky a Luhna.** Seznam prefixů stárne:
+dvojková řada MasterCard přišla až v roce 2017 a regexy, které ji neměly,
+tiše propouštěly platné karty. U sanitizeru je falešně negativní shoda dražší
+než falešně pozitivní.
+
+Prefix se proto používá k něčemu jinému — k **upozornění s vysokou jistotou**:
+
+```php
+$sanitizer->onCardNumberDetected(function (string $scheme, int $length): void {
+    $this->logger->warning("V payloadu byl nemaskovaný PAN ($scheme, $length cifer).");
+});
+```
+
+Listener dostane název schématu a délku, **nikdy hodnotu** — jinak by varování
+bylo dalším místem, kde PAN uniká. Smysl je nemaskovat potichu: PAN v logu
+znamená rozbitou integraci výš a někdo se to musí dozvědět, jinak zůstane
+databáze čistá a zdroj posílá PAN dál i jinam.
+
+Rozpoznání jde použít i samostatně:
+
+```php
+SensitiveDataSanitizer::detectCardScheme('4111111111111111');   // 'Visa'
+SensitiveDataSanitizer::detectCardScheme('20260831054055');     // null
+```
+
 ## Prázdné hodnoty
 
 Prázdná hodnota (`null`, `''`, `[]`) se nemaskuje ani pod citlivým klíčem —
