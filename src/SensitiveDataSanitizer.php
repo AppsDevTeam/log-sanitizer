@@ -120,7 +120,9 @@ final class SensitiveDataSanitizer
 		if (is_array($data)) {
 			$output = [];
 			foreach ($data as $key => $value) {
-				$output[$key] = is_string($key) && $this->isSensitiveKey($key)
+				// prazdna hodnota se nemaskuje: skryt neni co a v logu je rozdil
+				// mezi "pole bylo prazdne" a "pole melo hodnotu" diagnosticky
+				$output[$key] = is_string($key) && !self::isEmptyValue($value) && $this->isSensitiveKey($key)
 					? self::MASK
 					: $this->sanitize($value);
 			}
@@ -263,10 +265,49 @@ final class SensitiveDataSanitizer
 					return $matches[0];
 				}
 
+				// Luhnem projde nahodou kazde desate cislo, takze samotny Luhn
+				// nestaci: casova znacka typu 20250909095540 ma 14 cislic a v
+				// desetine pripadu by se zamaskovala. Zadne schema karet
+				// nezacina 19xx ani 20xx, takze vylouceni casovych znacek
+				// realne karty neminie.
+				if (self::looksLikeTimestamp($digits)) {
+					return $matches[0];
+				}
+
 				return str_repeat('*', $length - 4) . substr($digits, -4);
 			},
 			$value,
 		) ?? $value;
+	}
+
+	/** YYYYMMDDHHMMSS(mmm) nebo unixovy cas v milisekundach */
+	private static function looksLikeTimestamp(string $digits): bool
+	{
+		$length = strlen($digits);
+
+		if ($length === 13) {
+			// milisekundy od epochy pro roky ~2001-2033
+			return $digits >= '1000000000000' && $digits <= '2000000000000';
+		}
+
+		if ($length === 14 || $length === 17) {
+			[$year, $month, $day, $hour, $minute, $second] = [
+				(int) substr($digits, 0, 4), (int) substr($digits, 4, 2), (int) substr($digits, 6, 2),
+				(int) substr($digits, 8, 2), (int) substr($digits, 10, 2), (int) substr($digits, 12, 2),
+			];
+
+			return $year >= 1970 && $year <= 2099
+				&& $month >= 1 && $month <= 12
+				&& $day >= 1 && $day <= 31
+				&& $hour <= 23 && $minute <= 59 && $second <= 59;
+		}
+
+		return false;
+	}
+
+	private static function isEmptyValue(mixed $value): bool
+	{
+		return $value === null || $value === '' || $value === [];
 	}
 
 	private static function isLuhnValid(string $digits): bool

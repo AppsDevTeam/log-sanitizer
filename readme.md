@@ -81,8 +81,24 @@ $sanitizer->sanitize('platba kartou 4111 1111 1111 1111');
 ```
 
 Luhn je tam proto, aby se nemaskovalo každé delší číslo — objednávky, EAN
-ani IČ neprojdou. Falešně pozitivní shodu to ale nevylučuje úplně, takže
-u dat, kde by to vadilo, se dá vypnout: `disableCardNumberMasking()`.
+ani IČ neprojdou.
+
+**Samotný Luhn ale nestačí:** projde jím náhodou každé desáté číslo. Časová
+značka `20250909095540` má 14 cifer, spadá do rozsahu PAN, a bez další
+kontroly by se v 10 % případů zamaskovala — měřeno na 20 000 reálných
+značkách. Sanitizer proto vylučuje řetězce, které vypadají jako `YYYYMMDDHHMMSS`
+nebo jako unixový čas v milisekundách. Žádné karetní schéma nezačíná `19xx`
+ani `20xx`, takže tím o skutečné karty nepřijdeš.
+
+Už maskovaný PAN z terminálu (`************1111`) zůstává, jak přišel.
+
+U dat, kde by maskování vadilo, se dá vypnout: `disableCardNumberMasking()`.
+
+## Prázdné hodnoty
+
+Prázdná hodnota (`null`, `''`, `[]`) se nemaskuje ani pod citlivým klíčem —
+skrýt není co a v logu je rozdíl mezi „pole bylo prázdné" a „pole mělo
+hodnotu" diagnosticky užitečný.
 
 ## Co ještě dělá s řetězci
 
