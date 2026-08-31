@@ -1,0 +1,28 @@
+{
+	"name": "adt/log-sanitizer",
+	"type": "library",
+	"description": "Removes sensitive data from payloads before they are logged or persisted: masking by key name, per-request secrets, card number detection.",
+	"license": "MIT",
+	"authors": [
+		{
+			"name": "Apps Dev Team",
+			"homepage": "https://www.appsdevteam.com",
+			"email": "hello@appsdevteam.com"
+		}
+	],
+	"require": {
+		"php": ">=8.4",
+		"ext-mbstring": "*"
+	},
+	"require-dev": {
+		"nette/tester": "^2.5"
+	},
+	"autoload": {
+		"psr-4": {
+			"ADT\\LogSanitizer\\": "src"
+		}
+	},
+	"scripts": {
+		"test": "tester -C tests"
+	}
+}
