@@ -203,19 +203,24 @@ final class SensitiveDataSanitizer
 		if (is_array($data)) {
 			$output = [];
 			foreach ($data as $key => $value) {
+				// i KLIC musi byt ulozitelny: nevalidni UTF-8 v nazvu pole
+				// (utocny request posila i takove) rozbije json_encode uplne
+				// stejne jako v hodnote a log by se neulozil vubec
+				$cleanKey = is_string($key) ? self::sanitizeKey($key) : $key;
+
 				// prazdna hodnota se nemaskuje: skryt neni co a v logu je rozdil
 				// mezi "pole bylo prazdne" a "pole melo hodnotu" diagnosticky
-				if (!is_string($key) || self::isEmptyValue($value)) {
-					$output[$key] = $this->sanitize($value);
+				if (!is_string($cleanKey) || self::isEmptyValue($value)) {
+					$output[$cleanKey] = $this->sanitize($value);
 					continue;
 				}
 
-				if (self::matchesKey($key, self::CARD_NUMBER_KEYS)) {
-					$output[$key] = $this->sanitizeCardNumberValue($value);
+				if (self::matchesKey($cleanKey, self::CARD_NUMBER_KEYS)) {
+					$output[$cleanKey] = $this->sanitizeCardNumberValue($value);
 					continue;
 				}
 
-				$output[$key] = $this->isSensitiveKey($key)
+				$output[$cleanKey] = $this->isSensitiveKey($cleanKey)
 					? self::MASK
 					: $this->sanitize($value);
 			}
@@ -434,6 +439,19 @@ final class SensitiveDataSanitizer
 		}
 
 		return false;
+	}
+
+	/**
+	 * Nazev klice jen ocisti, aby byl ulozitelny - zadne maskovani ani
+	 * hledani karet: to jsou operace nad obsahem, ne nad strukturou.
+	 */
+	private static function sanitizeKey(string $key): string
+	{
+		if (!mb_check_encoding($key, 'UTF-8')) {
+			$key = mb_convert_encoding($key, 'UTF-8', 'UTF-8');
+		}
+
+		return self::removeControlCharacters($key);
 	}
 
 	private static function isEmptyValue(mixed $value): bool

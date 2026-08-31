@@ -37,3 +37,18 @@ Assert::same($text, $s->sanitize($text));
 
 // --- diakritika se neposkodi ---
 Assert::same('žluťoucký kůň úpěl ďábelské ódy', $s->sanitize('žluťoucký kůň úpěl ďábelské ódy'));
+
+// --- ocisti se i NAZEV klice: nevalidni UTF-8 v nem rozbije json_encode
+//     uplne stejne jako v hodnote a log by se neulozil vubec ---
+$badKey = "na\xB1zev";
+$out = $s->sanitize([$badKey => 'hodnota']);
+Assert::notSame(false, json_encode($out), 'cely zaznam musi byt serializovatelny');
+foreach (array_keys($out) as $k) {
+	Assert::true(mb_check_encoding((string) $k, 'UTF-8'));
+}
+
+Assert::same(['abc' => 'x'], $s->sanitize(["a\x00b\x07c" => 'x']), 'ridici znaky v klici');
+Assert::same(['heslo_pole' => 'x'], $s->sanitize(['heslo_pole' => 'x']), 'bezny klic se nemeni');
+
+// citlivost se posuzuje az po ocisteni klice
+Assert::same(['password' => SensitiveDataSanitizer::MASK], $s->sanitize(["pass\x00word" => 'Tajne123']));

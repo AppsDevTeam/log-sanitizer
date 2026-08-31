@@ -155,6 +155,8 @@ hodnotu" diagnosticky užitečný.
 - **neplatné UTF-8** převede — jinak útočný request rozbije `json_encode()`
   při zápisu logu a log se neuloží vůbec
 - **řídicí znaky** odstraní; `\n` a `\t` nechá
+- totéž platí pro **názvy klíčů** — nevalidní UTF-8 v názvu pole rozbije
+  `json_encode()` stejně jako v hodnotě; maskování se na klíče neaplikuje
 - **base64 nad 255 znaků** nahradí `md5:<hash>` — obrázky a přílohy log
   jen nafukují, hash stačí k rozpoznání, že šlo o tentýž obsah
 
