@@ -94,6 +94,24 @@ Už maskovaný PAN z terminálu (`************1111`) zůstává, jak přišel.
 
 U dat, kde by maskování vadilo, se dá vypnout: `disableCardNumberMasking()`.
 
+## Karetní klíče
+
+Klíče `pan` a `card_number` (včetně `MaskedPAN`, `cardNumber`…) se
+**nenahrazují paušálně**, ale jejich hodnota projde zkrácením:
+
+```php
+['PAN'       => '4111111111111111']  =>  ['PAN'       => '************1111']
+['MaskedPAN' => '************3035']  =>  ['MaskedPAN' => '************3035']
+```
+
+Zkrácení je metoda, kterou PCI DSS připouští, a poslední čtyřčíslí je potřeba
+k párování a reklamacím — paušální `***` by je zničilo bez jakéhokoli zisku.
+Když číslo pod takovým klíčem neprojde Luhnem, zamaskuje se celé; při vypnutém
+maskování karet neprojde vůbec.
+
+SAD (`cvv`, `pin`, `track`…) se naopak maskuje vždy celý — ten se ukládat
+nesmí ani zkrácený.
+
 ## Prázdné hodnoty
 
 Prázdná hodnota (`null`, `''`, `[]`) se nemaskuje ani pod citlivým klíčem —

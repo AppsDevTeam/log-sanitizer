@@ -19,14 +19,17 @@ Assert::true($s->isSensitiveKey('refresh_token'));
 Assert::true($s->isSensitiveKey('apiKey'), 'api_key sedi i bez oddelovace');
 Assert::true($s->isSensitiveKey('x-api-key'));
 Assert::true($s->isSensitiveKey('clientSecret'));
-Assert::true($s->isSensitiveKey('cardNumber'));
 
 // --- kratke terminy jen na cele slovo ---
 Assert::true($s->isSensitiveKey('pin'));
 Assert::true($s->isSensitiveKey('card_pin'));
 Assert::true($s->isSensitiveKey('pinBlock'));
 Assert::true($s->isSensitiveKey('cvv'));
-Assert::true($s->isSensitiveKey('pan'));
+
+// --- karetni klice NEJSOU "citlive" v tomto smyslu: jejich hodnota se
+//     nenahrazuje pausalne, ale zkracuje - viz cardNumberKeys.phpt ---
+Assert::false($s->isSensitiveKey('pan'));
+Assert::false($s->isSensitiveKey('cardNumber'));
 
 // tohle je duvod, proc kratke terminy nesmi byt podretezec:
 Assert::false($s->isSensitiveKey('shippingAddress'), '"shipping" obsahuje "pin"');

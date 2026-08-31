@@ -34,11 +34,24 @@ final class SensitiveDataSanitizer
 		// autentizace
 		'password', 'passwd', 'pwd', 'secret', 'token', 'authorization',
 		'api_key', 'private_key', 'refresh_token', 'access_token',
-		// karetni a PIN data
-		'pan', 'card_number', 'cvv', 'cvc', 'cid', 'pin', 'pin_block', 'track',
+		// SAD - nesmi se ukladat vubec, takze cela hodnota pryc
+		'cvv', 'cvc', 'cid', 'pin', 'pin_block', 'track',
 		// session
 		'cookie', 'session_id',
 	];
+
+	/**
+	 * Klice nesouci cislo karty. Jejich hodnota se NEnahrazuje pausalne, ale
+	 * projde maskovanim cisel karet - takze:
+	 *
+	 *   'PAN' => '4111111111111111'  ->  '************1111'
+	 *   'MaskedPAN' => '************3035'  ->  bez zmeny
+	 *
+	 * Uz zkracene cislo z terminalu je bezpecne (PCI DSS pripousti zkraceni
+	 * jako metodu) a soucasne potrebne k parovani a reklamacim, takze ho
+	 * pausalni '***' jen zbytecne znicí.
+	 */
+	public const array CARD_NUMBER_KEYS = ['pan', 'card_number'];
 
 	/**
 	 * Hlavicky, ktere se do logu nedostanou VUBEC (ani zamaskovane) - jejich
@@ -122,7 +135,17 @@ final class SensitiveDataSanitizer
 			foreach ($data as $key => $value) {
 				// prazdna hodnota se nemaskuje: skryt neni co a v logu je rozdil
 				// mezi "pole bylo prazdne" a "pole melo hodnotu" diagnosticky
-				$output[$key] = is_string($key) && !self::isEmptyValue($value) && $this->isSensitiveKey($key)
+				if (!is_string($key) || self::isEmptyValue($value)) {
+					$output[$key] = $this->sanitize($value);
+					continue;
+				}
+
+				if (self::matchesKey($key, self::CARD_NUMBER_KEYS)) {
+					$output[$key] = $this->sanitizeCardNumberValue($value);
+					continue;
+				}
+
+				$output[$key] = $this->isSensitiveKey($key)
 					? self::MASK
 					: $this->sanitize($value);
 			}
@@ -194,10 +217,37 @@ final class SensitiveDataSanitizer
 	 */
 	public function isSensitiveKey(string $key): bool
 	{
+		return self::matchesKey($key, $this->sensitiveKeys) || $this->matchesPattern($key);
+	}
+
+	/**
+	 * Hodnota pod klicem, ktery nese cislo karty: zkrati se na poslednich ctyr
+	 * cislic. Kdyz je maskovani karet vypnute, nesmi projit vubec.
+	 */
+	private function sanitizeCardNumberValue(mixed $value): mixed
+	{
+		if (!$this->maskCardNumbers) {
+			return self::MASK;
+		}
+
+		$sanitized = $this->sanitize($value);
+
+		// zachytna sit: cislo, ktere neproslo Luhnem (preklep v testovacich
+		// datech, jiny format), pod vyslovne karetnim klicem projit nesmi
+		if (is_string($sanitized) && preg_match('/\d{13,19}/', $sanitized) === 1) {
+			return self::MASK;
+		}
+
+		return $sanitized;
+	}
+
+	/** @param list<string> $terms */
+	private static function matchesKey(string $key, array $terms): bool
+	{
 		$words = self::words($key);
 		$joined = implode('', $words);
 
-		foreach ($this->sensitiveKeys as $sensitiveKey) {
+		foreach ($terms as $sensitiveKey) {
 			$termWords = self::words($sensitiveKey);
 			$term = implode('', $termWords);
 
@@ -214,6 +264,11 @@ final class SensitiveDataSanitizer
 			}
 		}
 
+		return false;
+	}
+
+	private function matchesPattern(string $key): bool
+	{
 		foreach ($this->sensitivePatterns as $pattern) {
 			if (preg_match($pattern, $key) === 1) {
 				return true;
