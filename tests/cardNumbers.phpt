@@ -40,5 +40,5 @@ Assert::same('123456789012', $s->sanitize('123456789012'), '12 cislic je pod hra
 Assert::same('12345678901234567890', $s->sanitize('12345678901234567890'), '20 cislic je nad hranici');
 
 // --- vypnuti ---
-$off = (new SensitiveDataSanitizer())->disableCardNumberMasking();
+$off = (new SensitiveDataSanitizer())->withoutCardNumberMasking();
 Assert::same('4111111111111111', $off->sanitize('4111111111111111'));

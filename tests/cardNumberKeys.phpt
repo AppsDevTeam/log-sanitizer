@@ -27,7 +27,7 @@ Assert::same(['PAN' => MASK], $s->sanitize(['PAN' => '1234567890123456']), 'nepl
 Assert::same(['PAN' => MASK], $s->sanitize(['PAN' => '20250909095540']), 'casova znacka pod PAN klicem taky ne');
 
 // --- s vypnutym maskovanim karet nesmi hodnota projit vubec ---
-$off = (new SensitiveDataSanitizer())->disableCardNumberMasking();
+$off = (new SensitiveDataSanitizer())->withoutCardNumberMasking();
 Assert::same(['PAN' => MASK], $off->sanitize(['PAN' => '4111111111111111']));
 Assert::same(['MaskedPAN' => MASK], $off->sanitize(['MaskedPAN' => '************3035']));
 

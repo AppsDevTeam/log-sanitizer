@@ -174,11 +174,22 @@ final class SensitiveDataSanitizer
 		return null;
 	}
 
-	public function disableCardNumberMasking(): static
+	/**
+	 * Kopie bez maskovani cisel karet.
+	 *
+	 * Withrem, ne setterem: sanitizer se registruje jako sdilena sluzba, takze
+	 * vypnuti na miste by ho vyplo i vsem ostatnim volajicim.
+	 *
+	 * Ma to smysl u dat, kde karetni cisla z podstaty nejsou a maskovani by
+	 * naopak nici uzitecny obsah - napr. podpisove kody v EET XML jsou
+	 * skupiny cislic oddelene pomlckami a Luhnem projde kazda desata.
+	 */
+	public function withoutCardNumberMasking(): self
 	{
-		$this->maskCardNumbers = false;
+		$clone = clone $this;
+		$clone->maskCardNumbers = false;
 
-		return $this;
+		return $clone;
 	}
 
 	/**

@@ -92,7 +92,7 @@ ani `20xx`, takže tím o skutečné karty nepřijdeš.
 
 Už maskovaný PAN z terminálu (`************1111`) zůstává, jak přišel.
 
-U dat, kde by maskování vadilo, se dá vypnout: `disableCardNumberMasking()`.
+U dat, kde by maskování vadilo, se dá vypnout: `withoutCardNumberMasking()`.
 
 ## Karetní klíče
 
