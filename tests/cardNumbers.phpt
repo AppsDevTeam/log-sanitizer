@@ -35,6 +35,30 @@ Assert::same('1234567890123456', $s->sanitize('1234567890123456'), 'neni platny 
 Assert::same('objednavka 20260831000123', $s->sanitize('objednavka 20260831000123'));
 Assert::same('8590123456789', $s->sanitize('8590123456789'), 'EAN-13');
 
+// --- UUID: hex s pomlckami splyne v kandidata a kazdy desaty projde Luhnem ---
+// d5018957-3288-49bb -> 5018957328849: 13 cislic, platny Luhn, prefix 5018 = Maestro
+$uuid = 'd5018957-3288-49bb-8e98-f1cb15ad8d71';
+Assert::same($uuid, $s->sanitize($uuid), 'UUID se nesmi zamaskovat');
+Assert::same(
+	['TransactionID' => $uuid],
+	$s->sanitize(['TransactionID' => $uuid]),
+);
+Assert::same("transakce $uuid zamitnuta", $s->sanitize("transakce $uuid zamitnuta"));
+
+// upozorneni na nemaskovany PAN se u UUID nesmi vystrelit
+$alerts = [];
+$listening = (new SensitiveDataSanitizer())
+	->onCardNumberDetected(function (string $scheme, int $length) use (&$alerts): void {
+		$alerts[] = [$scheme, $length];
+	});
+Assert::same($uuid, $listening->sanitize($uuid));
+Assert::same([], $alerts, 'zadny plany poplach');
+
+// skutecny PAN vedle UUID se zamaskovat MUSI - zamitnuty kandidat konci
+// uprostred PANu, takze se nesmi preskocit cely
+Assert::same("$uuid ************1111", $s->sanitize("$uuid 4111111111111111"));
+Assert::same("************1111 $uuid", $s->sanitize("4111111111111111 $uuid"));
+
 // --- kratka a dlouha cisla mimo rozsah PAN ---
 Assert::same('123456789012', $s->sanitize('123456789012'), '12 cislic je pod hranici');
 Assert::same('12345678901234567890', $s->sanitize('12345678901234567890'), '20 cislic je nad hranici');

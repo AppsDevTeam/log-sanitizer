@@ -88,6 +88,12 @@ final class SensitiveDataSanitizer
 	/** delka, od ktere se termin porovnava jako podretezec misto celeho slova */
 	private const int SUBSTRING_THRESHOLD = 5;
 
+	/** kanonicky tvar UUID (8-4-4-4-12 hexadecimalnich znaku) */
+	private const string UUID_PATTERN = '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i';
+
+	/** samostatne cislo delky PANu, pripoustejici oddelovace mezi skupinami */
+	private const string CARD_CANDIDATE_PATTERN = '/(?<![\d])\d[\d \-]{11,21}\d(?![\d])/';
+
 	/** base64 delsi nez tohle se nahradi hashem - typicky obrazky a prilohy */
 	private const int BASE64_HASH_THRESHOLD = 255;
 
@@ -385,35 +391,99 @@ final class SensitiveDataSanitizer
 	 */
 	private function maskCardNumbersIn(string $value): string
 	{
-		return preg_replace_callback(
-			'/(?<![\d])\d[\d \-]{11,21}\d(?![\d])/',
-			function (array $matches): string {
-				$digits = preg_replace('/\D/', '', $matches[0]) ?? '';
-				$length = strlen($digits);
+		/** @var list<array{int, int}>|null $uuidRanges pocita se az pri prvnim kandidatovi */
+		$uuidRanges = null;
+		$output = '';
+		$cursor = 0;
 
-				if ($length < 13 || $length > 19 || !self::isLuhnValid($digits)) {
-					return $matches[0];
-				}
+		while (preg_match(self::CARD_CANDIDATE_PATTERN, $value, $matches, PREG_OFFSET_CAPTURE, $cursor) === 1) {
+			[$candidate, $offset] = $matches[0];
+			$masked = $this->maskCardNumberCandidate($candidate, $offset, $value, $uuidRanges);
 
-				// Luhnem projde nahodou kazde desate cislo, takze samotny Luhn
-				// nestaci: casova znacka typu 20250909095540 ma 14 cislic a v
-				// desetine pripadu by se zamaskovala. Zadne schema karet
-				// nezacina 19xx ani 20xx, takze vylouceni casovych znacek
-				// realne karty neminie.
-				if (self::looksLikeTimestamp($digits)) {
-					return $matches[0];
-				}
+			if ($masked !== null) {
+				$output .= substr($value, $cursor, $offset - $cursor) . $masked;
+				$cursor = $offset + strlen($candidate);
+				continue;
+			}
 
-				// prefix schematu = vysoka jistota, ze to je skutecny PAN;
-				// tehdy ma smysl upozornit, ze je rozbita integrace vys
-				if ($this->cardNumberListener !== null && ($scheme = self::detectCardScheme($digits)) !== null) {
-					($this->cardNumberListener)($scheme, $length);
-				}
+			// Zamitnuty kandidat se NEpreskakuje cely, posouvame se o znak.
+			// Kandidat je hladovy a oddelovace bere jako soucast cisla, takze
+			// zacne v necem jinem a skonci uprostred skutecneho PANu za nim
+			// ("...ad8d71 4111111111111111" -> "71 4111111111111111",
+			// 18 cislic, Luhn neprojde). Preskocenim cele shody by PAN zustal
+			// v logu nezamaskovany. Dalsi hledani zacne az za prvni cislici -
+			// diky (?<!\d) se stejne chyti az dalsi samostatne cislo.
+			$output .= substr($value, $cursor, $offset - $cursor + 1);
+			$cursor = $offset + 1;
+		}
 
-				return str_repeat('*', $length - 4) . substr($digits, -4);
-			},
-			$value,
-		) ?? $value;
+		return $output . substr($value, $cursor);
+	}
+
+	/**
+	 * Zamaskovana podoba kandidata, nebo null, kdyz o cislo karty nejde.
+	 *
+	 * @param list<array{int, int}>|null $uuidRanges cache pozic UUID v $subject
+	 */
+	private function maskCardNumberCandidate(string $candidate, int $offset, string $subject, ?array &$uuidRanges): ?string
+	{
+		$digits = preg_replace('/\D/', '', $candidate) ?? '';
+		$length = strlen($digits);
+
+		if ($length < 13 || $length > 19 || !self::isLuhnValid($digits)) {
+			return null;
+		}
+
+		// Luhnem projde nahodou kazde desate cislo, takze samotny Luhn
+		// nestaci: casova znacka typu 20250909095540 ma 14 cislic a v
+		// desetine pripadu by se zamaskovala. Zadne schema karet
+		// nezacina 19xx ani 20xx, takze vylouceni casovych znacek
+		// realne karty neminie.
+		if (self::looksLikeTimestamp($digits)) {
+			return null;
+		}
+
+		// UUID je hex s pomlckami, takze jeho cislice splynou v kandidata
+		// stejne jako oddelovaci zapis PANu - a kazdy desaty projde Luhnem.
+		// Napr. d5018957-3288-49bb-... da 5018957328849: 13 cislic, platny
+		// Luhn, prefix 5018 = Maestro. Identifikator tak skonci zamaskovany
+		// a zaznam nedohledatelny, jeste k tomu s planym poplachem
+		// o nemaskovanem PANu. Skutecny PAN uvnitr UUID nikdy nelezi.
+		$uuidRanges ??= self::uuidRanges($subject);
+		foreach ($uuidRanges as [$start, $end]) {
+			// jen kandidat CELY uvnitr UUID; ten, ktery z nej vybiha,
+			// uz muze nest cislo zapsane za identifikatorem
+			if ($offset >= $start && $offset + strlen($candidate) <= $end) {
+				return null;
+			}
+		}
+
+		// prefix schematu = vysoka jistota, ze to je skutecny PAN;
+		// tehdy ma smysl upozornit, ze je rozbita integrace vys
+		if ($this->cardNumberListener !== null && ($scheme = self::detectCardScheme($digits)) !== null) {
+			($this->cardNumberListener)($scheme, $length);
+		}
+
+		return str_repeat('*', $length - 4) . substr($digits, -4);
+	}
+
+	/**
+	 * Pozice vsech UUID v retezci jako dvojice [zacatek, konec].
+	 *
+	 * @return list<array{int, int}>
+	 */
+	private static function uuidRanges(string $subject): array
+	{
+		if (!preg_match_all(self::UUID_PATTERN, $subject, $matches, PREG_OFFSET_CAPTURE)) {
+			return [];
+		}
+
+		$ranges = [];
+		foreach ($matches[0] as [$uuid, $offset]) {
+			$ranges[] = [$offset, $offset + strlen($uuid)];
+		}
+
+		return $ranges;
 	}
 
 	/** YYYYMMDDHHMMSS(mmm) nebo unixovy cas v milisekundach */
