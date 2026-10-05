@@ -100,7 +100,7 @@ final class SensitiveDataSanitizer
 	/** @var list<string> tajemstvi registrovana za behu pozadavku */
 	private array $hiddenValues = [];
 
-	/** @var (callable(string, int): void)|null */
+	/** @var (callable(string, int, string): void)|null */
 	private $cardNumberListener = null;
 
 	/**
@@ -159,7 +159,13 @@ final class SensitiveDataSanitizer
 	 * Listener dostane NAZEV SCHEMATU A DELKU, nikdy hodnotu - jinak by
 	 * varovani bylo dalsim mistem, kde PAN unikne.
 	 *
-	 * @param callable(string, int): void $listener
+	 * Tretim argumentem je cesta ke klici, pod kterym cislo lezelo
+	 * (`products[12].ean`, u holeho retezce prazdna). Bez ni je upozorneni
+	 * neakcni: hodnota v nem schvalne neni a v zamaskovanem logu se nalez
+	 * hleda naslepo. Listener se dvema parametry funguje dal - PHP prebyvajici
+	 * argument uzivatelske funkci tise zahodi.
+	 *
+	 * @param callable(string, int, string): void $listener
 	 */
 	public function onCardNumberDetected(callable $listener): static
 	{
@@ -206,6 +212,12 @@ final class SensitiveDataSanitizer
 	 */
 	public function sanitize(mixed $data): mixed
 	{
+		return $this->sanitizeAt($data, '');
+	}
+
+	/** @param string $path cesta k $data v puvodni strukture - jen pro upozorneni */
+	private function sanitizeAt(mixed $data, string $path): mixed
+	{
 		if (is_array($data)) {
 			$output = [];
 			foreach ($data as $key => $value) {
@@ -213,33 +225,34 @@ final class SensitiveDataSanitizer
 				// (utocny request posila i takove) rozbije json_encode uplne
 				// stejne jako v hodnote a log by se neulozil vubec
 				$cleanKey = is_string($key) ? self::sanitizeKey($key) : $key;
+				$childPath = self::childPath($path, $cleanKey);
 
 				// prazdna hodnota se nemaskuje: skryt neni co a v logu je rozdil
 				// mezi "pole bylo prazdne" a "pole melo hodnotu" diagnosticky
 				if (!is_string($cleanKey) || self::isEmptyValue($value)) {
-					$output[$cleanKey] = $this->sanitize($value);
+					$output[$cleanKey] = $this->sanitizeAt($value, $childPath);
 					continue;
 				}
 
 				if (self::matchesKey($cleanKey, self::CARD_NUMBER_KEYS)) {
-					$output[$cleanKey] = $this->sanitizeCardNumberValue($value);
+					$output[$cleanKey] = $this->sanitizeCardNumberValue($value, $childPath);
 					continue;
 				}
 
 				$output[$cleanKey] = $this->isSensitiveKey($cleanKey)
 					? self::MASK
-					: $this->sanitize($value);
+					: $this->sanitizeAt($value, $childPath);
 			}
 
 			return $output;
 		}
 
 		if ($data instanceof \stdClass) {
-			return $this->sanitize((array) $data);
+			return $this->sanitizeAt((array) $data, $path);
 		}
 
 		if (is_string($data)) {
-			return $this->sanitizeString($data);
+			return $this->sanitizeString($data, $path);
 		}
 
 		return $data;
@@ -281,7 +294,7 @@ final class SensitiveDataSanitizer
 
 			$output[$name] = $this->isSensitiveKey((string) $name)
 				? self::MASK
-				: $this->sanitize($value);
+				: $this->sanitizeAt($value, (string) $name);
 		}
 
 		return $output;
@@ -305,13 +318,13 @@ final class SensitiveDataSanitizer
 	 * Hodnota pod klicem, ktery nese cislo karty: zkrati se na poslednich ctyr
 	 * cislic. Kdyz je maskovani karet vypnute, nesmi projit vubec.
 	 */
-	private function sanitizeCardNumberValue(mixed $value): mixed
+	private function sanitizeCardNumberValue(mixed $value, string $path): mixed
 	{
 		if (!$this->maskCardNumbers) {
 			return self::MASK;
 		}
 
-		$sanitized = $this->sanitize($value);
+		$sanitized = $this->sanitizeAt($value, $path);
 
 		// zachytna sit: cislo, ktere neproslo Luhnem (preklep v testovacich
 		// datech, jiny format), pod vyslovne karetnim klicem projit nesmi
@@ -359,7 +372,7 @@ final class SensitiveDataSanitizer
 		return false;
 	}
 
-	private function sanitizeString(string $value): string
+	private function sanitizeString(string $value, string $path = ''): string
 	{
 		foreach ($this->hiddenValues as $secret) {
 			$value = str_replace($secret, self::MASK, $value);
@@ -378,7 +391,7 @@ final class SensitiveDataSanitizer
 		}
 
 		if ($this->maskCardNumbers) {
-			$value = $this->maskCardNumbersIn($value);
+			$value = $this->maskCardNumbersIn($value, $path);
 		}
 
 		return $value;
@@ -389,7 +402,7 @@ final class SensitiveDataSanitizer
 	 * projit Luhnovou kontrolou, aby se nemaskovala kazda delsi cislice
 	 * (objednavky, EAN, IC).
 	 */
-	private function maskCardNumbersIn(string $value): string
+	private function maskCardNumbersIn(string $value, string $path): string
 	{
 		/** @var list<array{int, int}>|null $uuidRanges pocita se az pri prvnim kandidatovi */
 		$uuidRanges = null;
@@ -398,7 +411,7 @@ final class SensitiveDataSanitizer
 
 		while (preg_match(self::CARD_CANDIDATE_PATTERN, $value, $matches, PREG_OFFSET_CAPTURE, $cursor) === 1) {
 			[$candidate, $offset] = $matches[0];
-			$masked = $this->maskCardNumberCandidate($candidate, $offset, $value, $uuidRanges);
+			$masked = $this->maskCardNumberCandidate($candidate, $offset, $value, $uuidRanges, $path);
 
 			if ($masked !== null) {
 				$output .= substr($value, $cursor, $offset - $cursor) . $masked;
@@ -424,8 +437,9 @@ final class SensitiveDataSanitizer
 	 * Zamaskovana podoba kandidata, nebo null, kdyz o cislo karty nejde.
 	 *
 	 * @param list<array{int, int}>|null $uuidRanges cache pozic UUID v $subject
+	 * @param string $path cesta ke klici pro upozorneni
 	 */
-	private function maskCardNumberCandidate(string $candidate, int $offset, string $subject, ?array &$uuidRanges): ?string
+	private function maskCardNumberCandidate(string $candidate, int $offset, string $subject, ?array &$uuidRanges, string $path): ?string
 	{
 		$digits = preg_replace('/\D/', '', $candidate) ?? '';
 		$length = strlen($digits);
@@ -461,10 +475,39 @@ final class SensitiveDataSanitizer
 		// prefix schematu = vysoka jistota, ze to je skutecny PAN;
 		// tehdy ma smysl upozornit, ze je rozbita integrace vys
 		if ($this->cardNumberListener !== null && ($scheme = self::detectCardScheme($digits)) !== null) {
-			($this->cardNumberListener)($scheme, $length);
+			($this->cardNumberListener)($scheme, $length, $this->sanitizePath($path));
 		}
 
 		return str_repeat('*', $length - 4) . substr($digits, -4);
+	}
+
+	/** Cesta k potomkovi: `products[12].ean`. */
+	private static function childPath(string $path, int|string $key): string
+	{
+		if (is_int($key)) {
+			return $path . '[' . $key . ']';
+		}
+
+		return $path === '' ? $key : $path . '.' . $key;
+	}
+
+	/**
+	 * Cesta, jak ji dostane listener.
+	 *
+	 * Nazvy klicu posila klient, takze klic sam muze byt cislo karty
+	 * (`{"4111111111111111": 1}`) nebo registrovane tajemstvi - a cesta
+	 * jde do upozorneni, tedy treba do e-mailu. Kazdy kandidat na PAN se
+	 * proto nahradi bez ohledu na Luhn: u cesty jde o orientaci, ne
+	 * o presnost. Cisti se az tady, ne pri skladani cesty - to bezi pro
+	 * kazdy klic payloadu, upozorneni jen vyjimecne.
+	 */
+	private function sanitizePath(string $path): string
+	{
+		foreach ($this->hiddenValues as $secret) {
+			$path = str_replace($secret, self::MASK, $path);
+		}
+
+		return preg_replace(self::CARD_CANDIDATE_PATTERN, self::MASK, $path) ?? self::MASK;
 	}
 
 	/**

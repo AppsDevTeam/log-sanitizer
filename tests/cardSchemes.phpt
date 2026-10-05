@@ -47,3 +47,43 @@ $s2 = (new SensitiveDataSanitizer())
 $neznamy = '9999999999999995';   // projde Luhnem, zadne schema
 Assert::true(str_contains((string) $s2->sanitize($neznamy), '*'), 'maskuje se');
 Assert::same([], $detected, 'ale neupozornuje - nizka jistota');
+
+// --- listener dostane cestu ke klici, aby slo nalez dohledat ---
+$paths = [];
+$s3 = (new SensitiveDataSanitizer())
+	->onCardNumberDetected(function (string $scheme, int $length, string $path) use (&$paths): void {
+		$paths[] = $path;
+	});
+$s3->sanitize(['products' => [['ean' => '8590123456789'], ['ean' => '30569309025904']]]);
+Assert::same(['products[1].ean'], $paths, 'vnorene pole i index');
+
+$paths = [];
+$s3->sanitize(['response' => ['MaskedPAN' => '************3035', 'PAN' => '4111111111111111']]);
+Assert::same(['response.PAN'], $paths, 'i pod karetnim klicem');
+
+$paths = [];
+$s3->sanitize('VISA 4111111111111111');
+Assert::same([''], $paths, 'holy retezec nema cestu');
+
+$paths = [];
+$s3->sanitizeJson('{"a":{"b":"4111111111111111"}}');
+Assert::same(['a.b'], $paths, 'JSON se prochazi stejne');
+
+$paths = [];
+$s3->sanitizeHeaders(['X-Card' => '4111111111111111']);
+Assert::same(['X-Card'], $paths, 'u hlavicek nazev hlavicky');
+
+// klic posila klient - v ceste nesmi uniknout PAN ani registrovane tajemstvi
+$paths = [];
+$s3->hideValue('zakaznik-abc-xyz');
+$s3->sanitize(['4111111111111111' => ['zakaznik-abc-xyz' => '5555555555554444']]);
+Assert::same(['[***].***'], $paths, 'ciselny klic PHP prevede na int, proto index');
+
+// listener se dvema parametry funguje dal
+$detected = [];
+(new SensitiveDataSanitizer())
+	->onCardNumberDetected(function (string $scheme, int $length) use (&$detected): void {
+		$detected[] = $scheme;
+	})
+	->sanitize(['x' => '4111111111111111']);
+Assert::same(['Visa'], $detected);

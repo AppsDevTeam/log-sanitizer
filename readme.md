@@ -127,13 +127,16 @@ než falešně pozitivní.
 Prefix se proto používá k něčemu jinému — k **upozornění s vysokou jistotou**:
 
 ```php
-$sanitizer->onCardNumberDetected(function (string $scheme, int $length): void {
-    $this->logger->warning("V payloadu byl nemaskovaný PAN ($scheme, $length cifer).");
+$sanitizer->onCardNumberDetected(function (string $scheme, int $length, string $path): void {
+    $this->logger->warning("V payloadu byl nemaskovaný PAN ($scheme, $length cifer) v klíči $path.");
 });
 ```
 
-Listener dostane název schématu a délku, **nikdy hodnotu** — jinak by varování
-bylo dalším místem, kde PAN uniká. Smysl je nemaskovat potichu: PAN v logu
+Listener dostane název schématu, délku a cestu ke klíči (`products[12].ean`,
+u holého řetězce prázdnou), **nikdy hodnotu** — jinak by varování
+bylo dalším místem, kde PAN uniká. Bez cesty se nález v zamaskovaném logu hledá
+naslepo. Názvy klíčů posílá klient, takže se v cestě nahradí každý kandidát
+na PAN i registrovaná tajemství. Listener se dvěma parametry funguje dál. Smysl je nemaskovat potichu: PAN v logu
 znamená rozbitou integraci výš a někdo se to musí dozvědět, jinak zůstane
 databáze čistá a zdroj posílá PAN dál i jinam.
 
