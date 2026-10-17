@@ -27,6 +27,26 @@ $result = $s->sanitize($image);
 Assert::match('md5:%h%', $result);
 Assert::same('md5:' . md5($image), $result, 'stejny vstup da stejny hash - jde porovnat vyskyt');
 
+// --- SVG dokument se nahradi hashem: souradnice by jinak delaly plane poplachy ---
+$alerts = [];
+$withListener = (new SensitiveDataSanitizer())
+	->onCardNumberDetected(function (string $scheme) use (&$alerts): void {
+		$alerts[] = $scheme;
+	});
+// realny pripad: "-211 23 127 -394 -20 228 126" da MasterCard/16 s platnym Luhnem
+$polygon = '<polygon points="310 239 -211 23 127 -394 -20 228 126 -265 68 -381"/>';
+$svg = '<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+		<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+		<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800">' . $polygon . '</svg>';
+Assert::same(['svg' => 'md5:' . md5($svg)], $withListener->sanitize(['svg' => $svg]));
+Assert::same([], $alerts, 'zadny poplach');
+Assert::same('md5:' . md5('<svg>' . $polygon . '</svg>'), $withListener->sanitize('<svg>' . $polygon . '</svg>'), 'i bez deklarace');
+
+// fragment ani text, ktery SVG jen obsahuje, dokumentem neni - prohledava se dal
+Assert::contains('********', (string) $withListener->sanitize($polygon), 'fragment bez <svg>');
+Assert::same(['MasterCard'], $alerts);
+Assert::same('karta ************1111 <svg></svg>', $withListener->sanitize('karta 4111 1111 1111 1111 <svg></svg>'), 'text pred <svg>');
+
 // kratky base64 se nechava, at se neztrati bezna data
 $shortBase64 = base64_encode('ahoj');
 Assert::same($shortBase64, $s->sanitize($shortBase64));

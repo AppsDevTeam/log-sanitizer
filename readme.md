@@ -140,6 +140,12 @@ na PAN i registrovaná tajemství. Listener se dvěma parametry funguje dál. Sm
 znamená rozbitou integraci výš a někdo se to musí dozvědět, jinak zůstane
 databáze čistá a zdroj posílá PAN dál i jinam.
 
+U dat, která skládáte sami (odpověď vlastního API, request posílaný jinam), upozornění
+nedává smysl — PAN by v nich mohl být jen tak, že dřív přišel některým vstupem, a ten
+už se kontroloval. Pro ně je `withoutCardNumberAlert()`: kopie, která dál maskuje, jen
+neupozorňuje. Tajemství z `hideValue()` přebírá jen ta registrovaná do chvíle vytvoření
+kopie, takže ji vytvářejte až těsně před použitím.
+
 Rozpoznání jde použít i samostatně:
 
 ```php
@@ -162,6 +168,11 @@ hodnotu" diagnosticky užitečný.
   `json_encode()` stejně jako v hodnotě; maskování se na klíče neaplikuje
 - **base64 nad 255 znaků** nahradí `md5:<hash>` — obrázky a přílohy log
   jen nafukují, hash stačí k rozpoznání, že šlo o tentýž obsah
+- **celý SVG dokument** (volitelně s XML deklarací a DOCTYPE) nahradí taky
+  `md5:<hash>` — kromě velikosti hlavně proto, že souřadnice oddělené mezerami
+  a mínusy (`310 239 -211 23 127`) splývají v kandidáta na PAN a každý desátý
+  projde Luhnem; plánek s desítkami objektů tak vyvolával planý poplach skoro
+  pokaždé. Fragment nebo text, který SVG jen obsahuje, se prohledává dál
 
 ## Testy
 

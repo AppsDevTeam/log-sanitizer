@@ -97,6 +97,13 @@ final class SensitiveDataSanitizer
 	/** base64 delsi nez tohle se nahradi hashem - typicky obrazky a prilohy */
 	private const int BASE64_HASH_THRESHOLD = 255;
 
+	/**
+	 * Cely SVG dokument: volitelna XML deklarace, DOCTYPE a komentare, pak
+	 * <svg ...> az po </svg> na konci. Jen fragment nebo text, ktery SVG
+	 * obsahuje, se za dokument nepovazuje.
+	 */
+	private const string SVG_DOCUMENT_PATTERN = '/^\s*(<\?xml\b[^>]*>\s*)?(<!DOCTYPE\b[^>]*>\s*)?(<!--.*?-->\s*)*<svg[\s>].*<\/svg>\s*$/is';
+
 	/** @var list<string> tajemstvi registrovana za behu pozadavku */
 	private array $hiddenValues = [];
 
@@ -200,6 +207,27 @@ final class SensitiveDataSanitizer
 	{
 		$clone = clone $this;
 		$clone->maskCardNumbers = false;
+
+		return $clone;
+	}
+
+	/**
+	 * Kopie, ktera cisla karet dal maskuje, ale neupozornuje na ne.
+	 *
+	 * Upozorneni znamena "rozbita integrace vys" a dava smysl jen u dat, ktera
+	 * slozil nekdo jiny - request od klienta, odpoved ciziho systemu. U
+	 * vlastniho vystupu (odpoved nasi API, request, ktery posilame jinam) by
+	 * PAN mohl byt jen tak, ze predtim prisel nekterym vstupem, a ten uz se
+	 * kontroloval - zbyvaji duplicity a plane poplachy z nahodnych cisel
+	 * s platnym Luhnem (EAN, identifikatory karet).
+	 *
+	 * Kopie prevezme tajemstvi z hideValue() registrovana DO TE CHVILE, pozdejsi
+	 * uz ne - vytvarej ji az tesne pred pouzitim.
+	 */
+	public function withoutCardNumberAlert(): self
+	{
+		$clone = clone $this;
+		$clone->cardNumberListener = null;
 
 		return $clone;
 	}
@@ -387,6 +415,16 @@ final class SensitiveDataSanitizer
 		$value = self::removeControlCharacters($value);
 
 		if (strlen($value) >= self::BASE64_HASH_THRESHOLD && self::isBase64($value)) {
+			return 'md5:' . md5($value);
+		}
+
+		// SVG je kresba, v logu nema diagnostickou hodnotu a jen ho nafukuje.
+		// Hlavne ale souradnice oddelene mezerami a minusy ("310 239 -211 23
+		// 127") splynou v kandidata na PAN stejne jako oddelovaci zapis karty
+		// a kazdy desaty projde Luhnem - plan s desitkami objektu tak vyvola
+		// plany poplach skoro pokazde a zamaskovane SVG je navic rozbite.
+		// Hash PAN neprozradi, takze se uvnitr hledat nemusi.
+		if (self::isSvgDocument($value)) {
 			return 'md5:' . md5($value);
 		}
 
@@ -606,6 +644,16 @@ final class SensitiveDataSanitizer
 	private static function removeControlCharacters(string $input): string
 	{
 		return preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $input) ?? $input;
+	}
+
+	private static function isSvgDocument(string $string): bool
+	{
+		// levny predfiltr - preg nad kazdou hodnotou payloadu by zbytecne zdrzoval
+		if (!str_contains($string, '<svg') && !str_contains($string, '<SVG')) {
+			return false;
+		}
+
+		return preg_match(self::SVG_DOCUMENT_PATTERN, $string) === 1;
 	}
 
 	private static function isBase64(string $string): bool

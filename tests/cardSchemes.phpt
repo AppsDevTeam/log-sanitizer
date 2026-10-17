@@ -87,3 +87,15 @@ $detected = [];
 	})
 	->sanitize(['x' => '4111111111111111']);
 Assert::same(['Visa'], $detected);
+
+// --- withoutCardNumberAlert(): maskuje dal, jen neupozornuje ---
+$detected = [];
+$alerting = (new SensitiveDataSanitizer())
+	->onCardNumberDetected(function (string $scheme, int $length) use (&$detected): void {
+		$detected[] = $scheme;
+	});
+$silent = $alerting->withoutCardNumberAlert();
+Assert::same(['receipt' => 'VISA ************1111'], $silent->sanitize(['receipt' => 'VISA 4111111111111111']));
+Assert::same([], $detected, 'kopie neupozornuje');
+$alerting->sanitize(['receipt' => 'VISA 4111111111111111']);
+Assert::same(['Visa'], $detected, 'puvodni sluzba upozornuje dal');
