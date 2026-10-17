@@ -98,6 +98,13 @@ final class SensitiveDataSanitizer
 	private const int BASE64_HASH_THRESHOLD = 255;
 
 	/**
+	 * Zacatek data URI s base64 obsahem: `data:image/png;base64,`. Media typ
+	 * (s parametry) je volitelny a omezeny na znaky tokenu z RFC 2045, takze
+	 * prefix nemuze nest libovolny text.
+	 */
+	private const string DATA_URI_PREFIX_PATTERN = '~^data:([a-z0-9!#$&^_.+\-]+/[a-z0-9!#$&^_.+\-]+(;[a-z0-9!#$&^_.+\-]+=[a-z0-9!#$&^_.+\-]+)*)?;base64,~i';
+
+	/**
 	 * Cely SVG dokument: volitelna XML deklarace, DOCTYPE a komentare, pak
 	 * <svg ...> az po </svg> na konci. Jen fragment nebo text, ktery SVG
 	 * obsahuje, se za dokument nepovazuje.
@@ -414,8 +421,20 @@ final class SensitiveDataSanitizer
 
 		$value = self::removeControlCharacters($value);
 
-		if (strlen($value) >= self::BASE64_HASH_THRESHOLD && self::isBase64($value)) {
-			return 'md5:' . md5($value);
+		if (strlen($value) >= self::BASE64_HASH_THRESHOLD) {
+			if (self::isBase64Block($value)) {
+				return 'md5:' . md5($value);
+			}
+
+			// data URI: media typ zustava, v logu je videt, ze slo o obrazek
+			// nebo prilohu; maskovanim karet projde, nazev posila klient
+			if (preg_match(self::DATA_URI_PREFIX_PATTERN, $value, $matches) === 1
+				&& self::isBase64Block(substr($value, strlen($matches[0])))
+			) {
+				$prefix = $this->maskCardNumbers ? $this->maskCardNumbersIn($matches[0], $path) : $matches[0];
+
+				return $prefix . 'md5:' . md5($value);
+			}
 		}
 
 		// SVG je kresba, v logu nema diagnostickou hodnotu a jen ho nafukuje.
@@ -654,6 +673,36 @@ final class SensitiveDataSanitizer
 		}
 
 		return preg_match(self::SVG_DOCUMENT_PATTERN, $string) === 1;
+	}
+
+	/**
+	 * Base64, i zalomene do radku (MIME po 76, PEM po 64 znacich).
+	 *
+	 * U zalomeneho se vyzaduje PRAVIDELNE zalomeni - vsechny radky stejne
+	 * dlouhe, jen posledni kratsi - jinak by za base64 prosel i viceradkovy
+	 * text, ktery nahodou nema mezery ani interpunkci.
+	 */
+	private static function isBase64Block(string $string): bool
+	{
+		if (!str_contains($string, "\n")) {
+			return self::isBase64($string);
+		}
+
+		$lines = preg_split('/\r?\n/', rtrim($string, "\r\n")) ?: [];
+		$last = array_pop($lines);
+		$width = strlen($lines[0] ?? $last ?? '');
+
+		if ($last === null || $last === '' || $width === 0 || $width % 4 !== 0 || strlen($last) > $width) {
+			return false;
+		}
+
+		foreach ($lines as $line) {
+			if (strlen($line) !== $width) {
+				return false;
+			}
+		}
+
+		return self::isBase64(implode('', $lines) . $last);
 	}
 
 	private static function isBase64(string $string): bool

@@ -27,6 +27,29 @@ $result = $s->sanitize($image);
 Assert::match('md5:%h%', $result);
 Assert::same('md5:' . md5($image), $result, 'stejny vstup da stejny hash - jde porovnat vyskyt');
 
+// --- zalomeny base64 (MIME po 76, PEM po 64 znacich) taky ---
+foreach ([76 => "\n", 64 => "\r\n"] as $width => $eol) {
+	$wrapped = chunk_split($image, $width, $eol);
+	Assert::same('md5:' . md5($wrapped), $s->sanitize($wrapped), "zalomeni po $width");
+	Assert::same('md5:' . md5(rtrim($wrapped)), $s->sanitize(rtrim($wrapped)), "bez koncoveho odradkovani, po $width");
+}
+
+// nepravidelne zalomeny text bez mezer za base64 nepovazujeme
+$irregular = implode("\n", [str_repeat('abcd', 30), str_repeat('efgh', 20), str_repeat('ijkl', 30)]);
+Assert::same($irregular, $s->sanitize($irregular));
+
+// --- data URI: media typ zustane, obsah se nahradi hashem ---
+$dataUri = 'data:image/png;base64,' . $image;
+Assert::same('data:image/png;base64,md5:' . md5($dataUri), $s->sanitize($dataUri));
+$dataUri = 'data:;base64,' . chunk_split($image, 76, "\n");
+Assert::same('data:;base64,md5:' . md5($dataUri), $s->sanitize($dataUri), 'bez media typu, zalomeny');
+$dataUri = 'data:text/plain;charset=utf-8;base64,' . $image;
+Assert::same('data:text/plain;charset=utf-8;base64,md5:' . md5($dataUri), $s->sanitize($dataUri), 's parametrem');
+
+// data URI, jehoz obsah base64 neni, se prohledava dal
+$notBase64 = 'data:image/png;base64,' . str_repeat('neni to base64 ', 20) . '4111111111111111';
+Assert::contains('************1111', (string) $s->sanitize($notBase64));
+
 // --- SVG dokument se nahradi hashem: souradnice by jinak delaly plane poplachy ---
 $alerts = [];
 $withListener = (new SensitiveDataSanitizer())

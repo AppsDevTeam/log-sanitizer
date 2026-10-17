@@ -167,7 +167,10 @@ hodnotu" diagnosticky užitečný.
 - totéž platí pro **názvy klíčů** — nevalidní UTF-8 v názvu pole rozbije
   `json_encode()` stejně jako v hodnotě; maskování se na klíče neaplikuje
 - **base64 nad 255 znaků** nahradí `md5:<hash>` — obrázky a přílohy log
-  jen nafukují, hash stačí k rozpoznání, že šlo o tentýž obsah
+  jen nafukují, hash stačí k rozpoznání, že šlo o tentýž obsah. Platí i pro
+  base64 zalomené do řádků (MIME po 76, PEM po 64 znacích; zalomení musí být
+  pravidelné) a pro **data URI**, kde media typ zůstane:
+  `data:image/png;base64,md5:<hash>`
 - **celý SVG dokument** (volitelně s XML deklarací a DOCTYPE) nahradí taky
   `md5:<hash>` — kromě velikosti hlavně proto, že souřadnice oddělené mezerami
   a mínusy (`310 239 -211 23 127`) splývají v kandidáta na PAN a každý desátý
