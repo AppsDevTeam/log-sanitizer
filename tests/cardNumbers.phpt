@@ -66,3 +66,30 @@ Assert::same('12345678901234567890', $s->sanitize('12345678901234567890'), '20 c
 // --- vypnuti ---
 $off = (new SensitiveDataSanitizer())->withoutCardNumberMasking();
 Assert::same('4111111111111111', $off->sanitize('4111111111111111'));
+
+// --- desetinna cisla: souradnice a meritka (fabric.js, SVG transform) maji za
+// teckou 14-17 cislic a kazde desate projde Luhnem. 0.38199830073025 -> 38199830073025:
+// 14 cislic, platny Luhn, prefix 38 = DinersClub. Skutecny PAN za desetinnou teckou
+// ani pred ni nikdy nelezi.
+$alerts = [];
+$listening = (new SensitiveDataSanitizer())
+	->onCardNumberDetected(function (string $scheme, int $length) use (&$alerts): void {
+		$alerts[] = [$scheme, $length];
+	});
+$floats = [
+	'{"left":0.38199830073025,"scaleX":-12.38199830073025}',
+	// realny plan z fabric.js: chyba zaokrouhleni -> 36999999999999 (DinersClub)
+	'[["C",115.16,38.65,113.36999999999999,36.86]]',
+	'<g transform="matrix(0.38199830073025 0 0 1 10 20)"></g>',
+	'38199830073025.5',
+	'38199830073025.5e3',
+];
+foreach ($floats as $float) {
+	Assert::same($float, $listening->sanitize($float), "desetinne cislo: $float");
+}
+Assert::same([], $alerts, 'zadny plany poplach u desetinnych cisel');
+
+// PAN na konci vety s teckou se zamaskovat MUSI
+Assert::same('karta ************1111.', $s->sanitize('karta 4111111111111111.'));
+Assert::same('karta ************1111. Dalsi veta', $s->sanitize('karta 4111111111111111. Dalsi veta'));
+Assert::same('1. ************1111', $s->sanitize('1. 4111111111111111'));

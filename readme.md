@@ -90,6 +90,12 @@ značkách. Sanitizer proto vylučuje řetězce, které vypadají jako `YYYYMMDD
 nebo jako unixový čas v milisekundách. Žádné karetní schéma nezačíná `19xx`
 ani `20xx`, takže tím o skutečné karty nepřijdeš.
 
+Ze stejného důvodu se ignorují **číslice desetinných čísel** — za desetinnou
+tečkou i před ní. Souřadnice a měřítka z canvasu (fabric.js, SVG `transform`)
+mají za tečkou 14–17 cifer: z `113.36999999999999` (chyba zaokrouhlení v JS)
+by bez toho bylo `36999999999999` — platný Luhn, prefix DinersClub, planý
+poplach. Tečka na konci věty za PANem (bez číslice za ní) maskování nebrání.
+
 Už maskovaný PAN z terminálu (`************1111`) zůstává, jak přišel.
 
 U dat, kde by maskování vadilo, se dá vypnout: `withoutCardNumberMasking()`.

@@ -91,8 +91,15 @@ final class SensitiveDataSanitizer
 	/** kanonicky tvar UUID (8-4-4-4-12 hexadecimalnich znaku) */
 	private const string UUID_PATTERN = '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i';
 
-	/** samostatne cislo delky PANu, pripoustejici oddelovace mezi skupinami */
-	private const string CARD_CANDIDATE_PATTERN = '/(?<![\d])\d[\d \-]{11,21}\d(?![\d])/';
+	/**
+	 * Samostatne cislo delky PANu, pripoustejici oddelovace mezi skupinami.
+	 * Nesmi byt soucasti desetinneho cisla - ani za desetinnou teckou, ani
+	 * pred ni. Souradnice a meritka (fabric.js, SVG transform) maji za teckou
+	 * 14-17 cislic a kazde desate projde Luhnem, napr. 0.38199830073025 ->
+	 * DinersClub. Skutecny PAN v desetinnem cisle nikdy nelezi; tecka za PANem
+	 * na konci vety (bez cislice za ni) kandidata nevylucuje.
+	 */
+	private const string CARD_CANDIDATE_PATTERN = '/(?<![\d])(?<!\d\.)\d[\d \-]{11,21}\d(?![\d])(?!\.\d)/';
 
 	/** base64 delsi nez tohle se nahradi hashem - typicky obrazky a prilohy */
 	private const int BASE64_HASH_THRESHOLD = 255;
